@@ -6,7 +6,7 @@ def connect_to_database():
     db = input("Enter a database name: ")
     while True:
         try:
-            return sqlite3.connect(f"./db/{db}.db")
+            return sqlite3.connect(f"../db/{db}.db")
         except sqlite3.OperationalError:
             print("Waiting for the database to be created...")
             time.sleep(1)

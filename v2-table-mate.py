@@ -1,11 +1,14 @@
 import json
 import math
 import os
-import curses
+import sqlite3
 
 CLEAR = False
 CLEAR = True
 MENU_WIDTH = 100
+
+
+DB_PATH = "./db"
 
 
 class Attribute:
@@ -90,9 +93,25 @@ class Table:
 
 
 class Database:
-    def __init__(self, name):
+    def __init__(self, name, conn):
         self.name = name
         self.tables = {}
+        self.load_existing_tables(conn)
+
+    def load_existing_tables(self, conn):
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = cursor.fetchall()
+        for table_name in tables:
+            table_name = table_name[0]  # fetchall() returns a list of tuples
+            self.tables[table_name] = Table(table_name)
+            cursor.execute(f"PRAGMA table_info({table_name});")
+            columns = cursor.fetchall()
+            for column in columns:
+                column_name = column[1]
+                column_type = column[2]
+                self.tables[table_name].attributes[column_name] = Attribute(
+                    column_name, column_type)
 
     def add_table(self, name):
         if name in self.tables:
@@ -116,56 +135,28 @@ class Database:
         print(json.dumps({self.name: json.loads(str(self))}, indent=2))
 
 
-class SQL:
-    def __init__(self):
-        self.databases = {}
-
-    def add_database(self, name):
-        if name in self.databases:
-            raise KeyError
-        self.databases[name] = Database(name)
-
-    def remove_database(self, name):
-        print(name)
-        print(self.databases)
-        if name not in self.databases:
-            raise KeyError
-        del self.databases[name]
-
-    def get_all_databases(self):
-        return self.databases.keys()
-
-    def __repr__(self):
-        databases_str = ', '.join(
-            [f'"{db_name}": {db}' for db_name, db in self.databases.items()])
-        return f'{{ "databases": {{ {databases_str} }} }}'
-
-    def print_json(self):
-        print(json.dumps(json.loads(str(self)), indent=2))
-
-
-def title(self, error=None):
+def title(self, message=None, decoration='<<< ERROR >>>'):
     line('=')
     center("Welcome to Table Mate")
     line('=')
-    if error:
-        error = str(error).strip('"')
-        center(f"{error}", "<<< ERROR >>>")
+    if message:
+        message = str(message).strip('"')
+        center(f"{message}", decoration=decoration)
         line('-')
     if self:
         self.print_json()
         line('-')
 
 
-def clear(data=None, error=None):
+def clear(data=None, message=None, decoration=' '):
     if CLEAR:
         _ = os.system('cls') if os.name == 'nt' else os.system('clear')
-        title(data, error)
+        title(data, message, decoration)
     else:
         line('-')
-        if error:
+        if message:
             line('*')
-            print(error)
+            print(message)
             line('*')
     return None
 
@@ -183,84 +174,24 @@ def center(message, decoration='', align='center', side='both'):
     print(f'{margin_left if side != "right" else " "*margin}{message}{margin_right if side != "left" else " "*margin}')
 
 
-sql = SQL()
-
-
-def sql_menu():
-    error = None
-    while True:
-        clear(sql, error)
-        error = None
-        center("Database Menu")
-        print("1. Create a database")
-        if sql.databases:
-            print("2. Delete a database")
-            print("3. Select a Database")
-        line('-')
-        option = input("Enter an option: ") if sql.databases else "1"
-        clear(sql)
-        if not option:
-            exit_opt = input("Would you like to exit? (y/n): ")
-            if exit_opt == "y":
-                exit()
-        elif option == "1":
-            while True:
-                error = clear(sql, error)
-                center("Create a database")
-                db_name = input("Enter a database name: ")
-                if not db_name:
-                    break
-                try:
-                    sql.add_database(db_name)
-                    break
-                except Exception:
-                    error = (f"Database '{db_name}' already exists.")
-            return db_name
-        elif option == "2" and sql.databases:
-            while True:
-                error = clear(sql, error)
-                center("Delete a database")
-                db_name = input("Enter a database name: ")
-                if not db_name:
-                    break
-                try:
-                    sql.remove_database(db_name)
-                    break
-                except Exception:
-                    error = f"Database '{db_name}' does not exist."
-        elif option == "3" and sql.databases:
-            while True:
-                error = clear(sql, error)
-                center("Select a database")
-                db_name = input("Enter a database name: ")
-                if not db_name:
-                    break
-                if db_name in sql.get_all_databases():
-                    return db_name
-                else:
-                    error = ("Database not found.")
-        else:
-            error = ("Invalid option.")
-
-
-def database_menu(db_name):
-    database = sql.databases[db_name]
+def table_menu(database):
     error = None
     while True:
         clear(database)
+
         center("Table Menu")
-        print("1. Create a table")
-        if database.tables:
-            print("2. Select a table")
-            print("3. Delete a table")
+        center("'[c]reate' - Create a table")
+        center("'[d]elete' - Delete a table")
+        center("'[s]elect' - Select a table")
+        center("'[SUBMIT]' - Submit Changes")
         line('-')
-        option = input("Enter an option: ") if database.tables else "1"
+        option = input("Enter an option: ") if database.tables else "create"
         clear(database)
         if not option:
-            return
-        elif option == "1":
+            return None
+        elif option.lower() in ["create", "c"]:
             while True:
-                error = clear(database, error)
+                error = clear(database, error, "<<< ERROR >>>")
                 center("Create a table")
                 table_name = input("Enter a table name: ")
                 if not table_name:
@@ -270,18 +201,7 @@ def database_menu(db_name):
                     return table_name
                 except Exception:
                     error = f"Table '{table_name}' already exists."
-        elif option == "2" and database.tables:
-            while True:
-                error = clear(database, error)
-                center("Select a table")
-                table_name = input("Enter a table name: ")
-                if not table_name:
-                    break
-                if table_name in database.get_all_tables():
-                    return table_name
-                else:
-                    print("Table not found.")
-        elif option == "3" and database.tables:
+        elif option.lower() in ["delete", "d"] and database.tables:
             while True:
                 error = clear(database, error)
                 center("Delete a table")
@@ -293,10 +213,30 @@ def database_menu(db_name):
                     break
                 except Exception:
                     error = f"Table '{table_name}' does not exist."
+        elif option.lower() in ["select", "s"] and database.tables:
+            while True:
+                error = clear(database, error)
+                center("Select a table")
+                table_name = input("Enter a table name: ")
+                if not table_name:
+                    break
+                if table_name in database.get_all_tables():
+                    return table_name
+                else:
+                    print("Table not found.")
+        elif option in ["SUBMIT"] and database.tables:
+            error = clear(database, error)
+            center("Submit changes?", "<<< WARNING >>>")
+            submit_confirmation = input("Enter 'Y' to submit changes: ")
+            if submit_confirmation != "Y":
+                break
+            print("Changes submitted.")
+            input()
 
 
-def table_menu(db_name, table_name):
-    table = sql.databases[db_name].tables[table_name]
+def attribute_menu(table_name, database):
+    # target_db is your target database
+    table = database.tables[table_name]
     error = None
     while True:
         clear(table)
@@ -308,7 +248,7 @@ def table_menu(db_name, table_name):
         option = input("Enter an option: ") if table.attributes else '1'
         clear(table)
         if not option:
-            return
+            return None
         elif option == "1":
             help_toggle = False
             while True:
@@ -324,7 +264,7 @@ def table_menu(db_name, table_name):
                     help_toggle = not help_toggle
                     continue
                 if not attr:
-                    break
+                    return
                 try:
                     error = None
                     table.add_attribute(attr)
@@ -372,11 +312,30 @@ def type_menu():
 
 def main():
     clear()
+
     while True:
-        if db_name := sql_menu():
-            if table_name := database_menu(db_name):
-                table_menu(db_name, table_name)
+        dirs = os.listdir("./db/")
+        clear(None, dirs, "<< Available Databases >>")
+        db_name = input("Enter a database name: ")
+        if not db_name:
+            break
+        elif f"{db_name}.db" not in dirs:
+            option = input("Would you like to create this database? (y/n): ")
+            if option.lower() != "y":
+                continue
+        conn = sqlite3.connect(f"./db/{db_name}.db")
+        database = Database(db_name, conn)
+        if cursor := conn.cursor():
+            while True:
+                table_name = table_menu(database)
+                if not table_name:
+                    break
+                while True:
+                    attribute = attribute_menu(table_name, database)
+                    if not attribute:
+                        break
+    cursor.close()
+    conn.close()
 
 
-sql = SQL()
 main()
